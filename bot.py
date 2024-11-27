@@ -29,6 +29,11 @@ ATOM_FEED_URL = f"http://export.arxiv.org/api/query?search_query=cat:{CATEGORY}&
 
 # Define LLM Parameters
 N_CTX = 16384
+TEMPERATURE = 0.7 # Default 0.8
+SEED = 42 # Default 0
+TOP_P = 0.9 # Default 0.9
+TOP_K = 40 # Default 40
+NUM_PREDICT = -2 # Default 128, -1: Infinite, -2: Fill Context
 
 # Function: Invoke LLM
 def invoke_llm(input_text, num_ctx=N_CTX):
@@ -44,7 +49,14 @@ def invoke_llm(input_text, num_ctx=N_CTX):
             "method_name": "generate",
             "input": {
                 "prompt": input_text,
-                "num_ctx": num_ctx,
+                "options": {
+                    "num_ctx": num_ctx,
+                    "temperature": TEMPERATURE,
+                    "seed": SEED,
+                    "top_p": TOP_P,
+                    "top_k": TOP_K,
+                    "num_predict": NUM_PREDICT,
+                }
             }
         }
     }
@@ -66,74 +78,48 @@ def build_one_liner(atom_feed_url=ATOM_FEED_URL, DEBUG=False):
     atom_feed = feedparser.parse(atom_feed_url)
     one_liners = []
     for entry in tqdm(atom_feed.entries, desc="Building one-liners"):
-        text = "Give me a one-liner summary of what the following research paper is about:\n"
-        text += f"Title: {entry.title.replace('\n','')}\nAbstract: {entry.summary.replace('\n','')}"
+        # Ensure abstract fits into the LLM prompt size
+        abstract = entry.summary.replace('\n', '')[:2000]  # Truncate to 2000 characters if needed
+        text = (
+            "Summarize the following research paper in **one sentence**. "
+            "Focus on the main finding or purpose of the research. Avoid excessive details or context.\n"
+            f"Title: {entry.title}\nAbstract: {abstract}"
+        )
         response = invoke_llm(text)
-        one_liners.append(f"Title: {entry.title.replace('\n','')}\n" + response)
+        one_liners.append(f"Title: {entry.title}\nSummary: {response}")
     return one_liners
 
-# Function: Build input text to send to LLM
-def summarize_articles(atom_feed_url, DEBUG=False):
-    # Parse the feed
+# Function: Extract insights from the list of one-liner summaries
+def summarize_one_liners(one_liners, DEBUG=False):
+    text = (
+        "Below are one-line summaries of recent AI research papers. Your task is to identify exactly **3 key insights** "
+        "or trends emerging from these summaries.\n\n"
+        "**Instructions:**\n"
+        "1. Group summaries into themes or research areas if they share a common methodology, application, or challenge.\n"
+        "2. Identify the **top 3 insights** based on the most recurring and impactful themes.\n"
+        "3. Provide a short explanation for each insight and reference specific paper titles to support your conclusion.\n\n"
+        "**What NOT to do:**\n"
+        "1. Do NOT summarize each individual paper.\n"
+        "2. Do NOT include more than 3 insights.\n"
+        "3. Do NOT list generic topics unless explicitly supported by multiple papers.\n\n"
+        "**Output Format:**\n"
+        "- **Insight 1**: [Short and clear description of the insight]\n"
+        "  - Supporting Evidence: [Paper titles or quotes from summaries]\n"
+        "- **Insight 2**: [Short and clear description of the insight]\n"
+        "  - Supporting Evidence: [Paper titles or quotes from summaries]\n"
+        "- **Insight 3**: [Short and clear description of the insight]\n"
+        "  - Supporting Evidence: [Paper titles or quotes from summaries]\n\n"
+        "**Summaries:**\n"
+    )
+    for record in one_liners:
+        text += f"{record}\n----------\n"
+
     if DEBUG:
-        print("Extracting ATOM feeds")
-    atom_feed = feedparser.parse(atom_feed_url)
-
-    # Build text
-    text = """The following are abstracts from the latest research papers on Artificial Intelligence. Your task is to identify the **top 3 research trends** based on the abstracts.
-
-**What to do:**
-1. Analyze the abstracts and group them into overarching themes (e.g., specific methodologies, applications, or challenges).
-2. Identify **exactly 3 trends** that are discussed or implied in **multiple papers**, and prioritize those that seem most prominent or impactful.
-3. Provide a brief explanation for each trend and reference specific papers to justify your choice.
-
-**What NOT to do:**
-1. Do NOT summarize each individual paper.
-2. Do NOT include more than 3 trends.
-3. Do NOT list generic topics like "machine learning" or "optimization" unless explicitly supported by multiple papers.
-
-**Output Format:**
-- **Trend 1**: [Clear and concise description of the trend]
-  - Supporting Evidence: [List specific paper titles or key phrases from abstracts that support this trend]
-- **Trend 2**: [Clear and concise description of the trend]
-  - Supporting Evidence: [List specific paper titles or key phrases from abstracts that support this trend]
-- **Trend 3**: [Clear and concise description of the trend]
-  - Supporting Evidence: [List specific paper titles or key phrases from abstracts that support this trend]
-
-**Articles**:
-"""
-    for entry in atom_feed.entries:
-        text += f"Title: {entry.title.replace('\n','')}\nAbstract: {entry.summary.replace('\n','')}\n----------\n"
-
-    ctx_len = len(text) // 4
-    new_ctx = int(math.ceil(ctx_len // 1000) * 1000) + 1000
-    if DEBUG:
-        print(f"Estimated Context Length: {ctx_len}") # Assuming ~4 characters per token on average
-    if ctx_len > N_CTX:
-        if DEBUG:
-            print(f"Increasing N_CTX to {new_ctx}")
-        response = invoke_llm(text, num_ctx=new_ctx)
-    else:
-        response = invoke_llm(text)
+        print(f"Sending text to LLM:\n{text}")
+    response = invoke_llm(text)
     return response
 
 if __name__ == "__main__":
-    summary_text = summarize_articles(ATOM_FEED_URL, DEBUG=True)
-    print(summary_text)
-
-# # Parse the feed
-# feed = feedparser.parse(atom_feed_url)
-
-# # Access feed metadata
-# print("Feed Title:", feed.feed.title)
-# print("Feed Link:", feed.feed.link)
-
-# # Iterate through feed entries
-# for entry in feed.entries:
-#     print("Title:", entry.title.replace('\n',''))
-#     print("ID:", entry.id)
-#     print("Published:", entry.published)
-#     print("Author:", entry.author)
-#     print("Category:", entry.category)
-#     print("Summary:", entry.summary.replace('\n',''))
-#     print()
+    one_liners = build_one_liner(ATOM_FEED_URL, DEBUG=True)
+    insights = summarize_one_liners(one_liners)
+    print(insights)
