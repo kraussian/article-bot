@@ -28,6 +28,7 @@ MAX_RESULTS = 50
 ATOM_FEED_URL = f"http://export.arxiv.org/api/query?search_query=cat:{CATEGORY}&max_results={MAX_RESULTS}"
 
 # Define LLM Parameters
+# Refer to Ollama documentation: https://github.com/ollama/ollama/blob/main/docs/modelfile.md#valid-parameters-and-values
 N_CTX = 16384
 TEMPERATURE = 0.7 # Default 0.8
 SEED = 42 # Default 0
@@ -81,7 +82,7 @@ def build_one_liner(atom_feed_url=ATOM_FEED_URL, DEBUG=False):
         # Ensure abstract fits into the LLM prompt size
         abstract = entry.summary.replace('\n', '')[:2000]  # Truncate to 2000 characters if needed
         text = (
-            "Summarize the following research paper in **one sentence**. "
+            "Summarize the following research paper concisely in **one sentence**. "
             "Focus on the main finding or purpose of the research. Avoid excessive details or context.\n"
             f"Title: {entry.title}\nAbstract: {abstract}"
         )
